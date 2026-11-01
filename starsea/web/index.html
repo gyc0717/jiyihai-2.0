@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>记忆星海</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <canvas id="sea"></canvas>
+
+  <div class="vignette"></div>
+
+  <header class="hud head">
+    <div class="title">
+      <h1>记忆星海</h1>
+      <p class="sub"><span id="subtitle">正在打捞…</span><span id="live" class="live" title="实时"></span></p>
+    </div>
+    <div class="head-actions">
+      <button id="drift" class="ghost" title="空格">漂游 · 开</button>
+      <button id="rebuild" class="ghost" title="重新扫描聊天记录">重新抽取</button>
+    </div>
+  </header>
+
+  <aside class="hud side" id="side">
+    <section>
+      <h2>来处</h2>
+      <div class="chips" id="sources"></div>
+    </section>
+    <section>
+      <h2>星座</h2>
+      <ul class="constellations" id="clusters"></ul>
+    </section>
+    <section class="hint">
+      <h2>怎么用</h2>
+      <p>拖动旋转 · 滚轮远近 · 点星读记忆</p>
+      <p class="dim">空下来的时候，它会自己慢慢漂。</p>
+    </section>
+  </aside>
+
+  <div id="toast" class="toast"></div>
+
+  <div class="hud searchbar">
+    <input id="search" type="search" placeholder="找一段记忆：关键词、人名、一句话…" autocomplete="off" />
+    <span id="searchinfo"></span>
+  </div>
+
+  <article class="hud card" id="card" hidden>
+    <button class="close" id="cardclose" aria-label="关闭">×</button>
+    <div class="card-top">
+      <span class="badge" id="card-src">来源</span>
+      <time id="card-time"></time>
+    </div>
+    <h3 id="card-title"></h3>
+    <div class="tags" id="card-tags"></div>
+    <div class="body" id="card-text"></div>
+    <div class="reply" id="card-reply" hidden>
+      <span class="label">当时的回应</span>
+      <p id="card-reply-text"></p>
+    </div>
+    <footer id="card-foot"></footer>
+  </article>
+
+  <div class="hud timeline" id="timeline">
+    <span id="tl-from"></span>
+    <div class="bar"><i id="tl-fill"></i></div>
+    <span id="tl-to"></span>
+  </div>
+
+  <div class="empty" id="empty" hidden>
+    <h2>星海还是空的</h2>
+    <p>没扫到聊天记录。先跟我聊几句，或者把导出的记录放进 <code>data/inbox/</code>。</p>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

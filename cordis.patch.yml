@@ -1,0 +1,8 @@
+# 把「记忆星海」插进 DSH 的层叠配置。
+# 装好之后，profile 只要在 dsh.profile.bundles 里列出 dsh-memory-starsea 即生效。
+
+- insert:
+    - id: memory-starsea
+      name: dsh-memory-starsea
+      config:
+        enabled: true

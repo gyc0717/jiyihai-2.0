@@ -1,0 +1,5 @@
+tools/
+docs/
+*.cmd
+.gitignore
+.npmignore

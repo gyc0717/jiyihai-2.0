@@ -1,0 +1,55 @@
+{
+  "name": "dsh-memory-starsea",
+  "version": "1.0.0",
+  "description": "把和 AI 聊过的记录摊成一片能漂游的星海 —— DeepSeek Harness 插件，一条记忆一颗星，相近的自成星座",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "starsea",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "memory",
+    "star-map",
+    "visualization",
+    "webgl",
+    "chat-history"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node starsea/server.mjs",
+    "build": "node starsea/ingest.mjs",
+    "check": "node tools/check-plugin.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gyc0717/dsh-memory-starsea.git"
+  },
+  "homepage": "https://github.com/gyc0717/dsh-memory-starsea#readme",
+  "bugs": {
+    "url": "https://github.com/gyc0717/dsh-memory-starsea/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}
