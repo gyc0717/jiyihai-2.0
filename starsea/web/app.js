@@ -4,7 +4,9 @@
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// 星流：整片星海绕中心转的角速度（弧度/秒）。转一圈约 8.7 分钟。
+// 星流：整片星海绕中心转的角速度（弧度/秒）。
+// 正值 = 顺时针（近侧边缘向左走，像从上方看一个正在右转的唱片）。
+// 转一圈约 8.7 分钟。
 const SPIN = 0.012;
 
 // ------------------------------------------------------------ 4x4 矩阵
@@ -354,10 +356,13 @@ const S = {
   spawn: new Map(),
   frame: null,
   lastInput: performance.now(),
-  cam: { yaw: 0.7, pitch: 0.30, dist: 96, target: [0, 0, 0] },
-  camTo: { yaw: 0.7, pitch: 0.30, dist: 96, target: [0, 0, 0] },
+  // 俯角压低：远看是一条横着铺开的星带，而不是一盘站着的圆盘
+  cam: { yaw: 0.45, pitch: 0.16, dist: 96, target: [0, 0, 0] },
+  camTo: { yaw: 0.45, pitch: 0.16, dist: 96, target: [0, 0, 0] },
   flying: false,
-  time: 0,
+  // ?t=秒 可以从指定的时间点开始，方便截图对比
+  time: Number(new URLSearchParams(location.search).get('t') || 0) || 0,
+  still: new URLSearchParams(location.search).has('still'),
   proj: null,
   view: null,
   w: 1,
@@ -488,9 +493,10 @@ function toast(text) {
 }
 
 function fitCamera() {
-  let maxR = 20;
-  for (const s of S.stars) maxR = Math.max(maxR, Math.hypot(s.pos[0], s.pos[2]));
-  S.cam.dist = clamp(maxR * 1.75, 55, 175);
+  // 横着铺开的星带，按宽度来取景；用分位数而不是最大值，免得一两颗离群的星把镜头拉太远
+  const xs = S.stars.map((s) => Math.abs(s.pos[0])).sort((a, b) => a - b);
+  const p = xs.length ? xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.92))] : 20;
+  S.cam.dist = clamp(p * 2.15, 45, 240);
   S.camTo.dist = S.cam.dist;
   S.cam.target = [0, 0, 0];
   S.camTo.target = [0, 0, 0];
@@ -814,6 +820,11 @@ function buildStarBuffers(t) {
       else a *= 0.10;
     }
     if (i === S.hover) { size *= 1.35; a = Math.min(1, a + 0.25); }
+
+    // 核心更亮：越靠近中心的星越大越亮，远看就是一团聚起来的高亮核心
+    const core = Math.exp(-Math.abs(s.pos[0]) / 9);
+    size *= 1 + core * 0.85;
+    a = Math.min(1, a + core * 0.22);
     if (i === S.selected) {
       const pulse = 1 + Math.sin(t * 3.2) * 0.10;
       size = 9.5 * pulse;
@@ -899,9 +910,9 @@ function frame(now) {
   S.prev = now;
   S.time += dt / 1000;
 
-  // 闲置后自动漂游
+  // 闲置后自动漂游（?still=1 关掉，截对比图时用）
   const idle = now - S.lastInput > 2600;
-  if (S.drift && idle && !drag) {
+  if (S.drift && !S.still && idle && !drag) {
     // 镜头只轻轻转，主角让给星海自己的星流
     S.camTo.yaw += dt * 0.000016;
     S.camTo.pitch = clamp(S.camTo.pitch + Math.sin(S.time * 0.13) * dt * 0.000012, -0.9, 0.9);

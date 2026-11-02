@@ -447,14 +447,13 @@ function kmeans(vecs, k, iters = 24) {
   return { centers, assign };
 }
 
-/** 读上一次的坐标系锚点。有了它，新星只会往外长，旧星不会挪窝。 */
+/** 读上一次的坐标系锚点。有了它，新星只会往边上长，旧星不会挪窝。 */
 function readPrevLayout() {
   try {
     const doc = JSON.parse(fs.readFileSync(OUT_FILE, 'utf8'));
     const l = doc && doc.layout;
-    if (l && l.v === 2 && Number.isFinite(l.t0) && Number.isFinite(l.sx) && Number.isFinite(l.sz)) {
-      return { v: 2, t0: l.t0, sx: l.sx, sz: l.sz };
-    }
+    const ok = l && (l.v === 2 || l.v === 3) && Number.isFinite(l.t0) && Number.isFinite(l.sx) && Number.isFinite(l.sz);
+    if (ok) return { v: 3, t0: l.t0, sx: l.sx, sz: l.sz };
   } catch { /* 第一次跑，没有旧文件 */ }
   return null;
 }
@@ -481,14 +480,17 @@ function build() {
 
   const projected = vecs.map(project2d);
 
-  // ---- 位置：用一套「不随数据漂移」的坐标系
-  // 每次重建都重新归一化的话，新来一颗星就会让整片星海挪一次。
-  // 所以把锚点（t0 / 语义缩放）存进 starsea.json，之后一直沿用：
-  // 新星只会在外圈长出来，旧星原地不动。
+  // ---- 位置：一片扁平的星海
+  //   x —— 语义主轴，左右延展。随机投影出来的分布本身近似正态，
+  //        所以中间天然密、往两边越来越稀，正好是「核心 + 散开的碎星」。
+  //   z —— 纵深：语义次轴 + 时间（越久远越靠里）。
+  //   y —— 压得很薄，远看就是一条横着铺开的星带。
+  // 锚点（t0 / 语义缩放）存在 starsea.json 里，之后一直沿用：
+  // 新星只会在带子边缘长出来，旧星不会整体挪窝。
   let layout = readPrevLayout();
   if (!layout) {
     layout = {
-      v: 2,
+      v: 3,
       t0: tMin,
       sx: quantile(projected.map((p) => Math.abs(p[0])), 0.92) || 1,
       sz: quantile(projected.map((p) => Math.abs(p[1])), 0.92) || 1,
@@ -499,12 +501,18 @@ function build() {
   const stars = units.map((u, i) => {
     const [x0, z0] = projected[i];
     const days = Math.max(0, (u.t - layout.t0) / DAY);
-    const grow = 1 - Math.exp(-days / 18);              // 越久远越靠外，最后趋于稳定
-    const theta = (x0 / layout.sx) * 1.5 + days * 0.06; // 语义定方向，时间把旋臂慢慢拧过来
-    const radius = 8 + grow * 34 + (z0 / layout.sz) * 3.2;
-    const x = Math.cos(theta) * radius;
-    const z = Math.sin(theta) * radius;
-    const y = (z0 / layout.sz) * 6.5 + Math.sin(days / 9) * 2.4 + grow * 2.5;
+    const grow = 1 - Math.exp(-days / 18);
+
+    const tx = Math.max(-2.6, Math.min(2.6, x0 / layout.sx));
+    const tz = Math.max(-2.6, Math.min(2.6, z0 / layout.sz));
+
+    // 稳定的微抖动，避免规则得像素描格子
+    const j1 = (hash32(u.id, 0x9e3779b1) % 1000) / 1000 - 0.5;
+    const j2 = (hash32(u.id, 0x85ebca6b) % 1000) / 1000 - 0.5;
+
+    const x = tx * 19 + j1 * 1.4;
+    const z = tz * 5.5 + (grow - 0.5) * 10 + j2 * 1.6;
+    const y = j1 * 2.4 + (grow - 0.5) * 1.4;
     const w = intensity(u.text);
     return {
       id: u.id,
