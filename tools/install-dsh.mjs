@@ -37,17 +37,38 @@ const backup = PKG_JSON + '.bak-memory-starsea-' + stamp
 fs.copyFileSync(PKG_JSON, backup)
 say('已备份 package.json → ' + path.basename(backup))
 
-// 整包拷贝（真实目录，不用软链）
+// 默认做成指向仓库的链接（junction）：以后改代码不用重装，DSH 读到的永远是最新的。
+// 链接建不了才退回整包拷贝（拷贝那份会「变旧」，改完要重跑本脚本）。
+const sh = (m) => console.log('  ' + m)
+
 if (fs.existsSync(DEST)) {
-  fs.rmSync(DEST, { recursive: true, force: true })
-  say('清掉了旧的插件目录')
+  let isLink = false
+  try { isLink = fs.lstatSync(DEST).isSymbolicLink() } catch { /* 忽略 */ }
+  if (isLink) {
+    try { fs.rmdirSync(DEST) } catch { fs.unlinkSync(DEST) }
+  } else {
+    fs.rmSync(DEST, { recursive: true, force: true })
+  }
+  say('清掉了旧的安装位置')
 }
-fs.mkdirSync(DEST, { recursive: true })
-for (const name of SHIP) {
-  const src = path.join(ROOT, name)
-  if (!fs.existsSync(src)) continue
-  fs.cpSync(src, path.join(DEST, name), { recursive: true })
-  say('+ ' + name)
+
+let linked = false
+try {
+  fs.symlinkSync(ROOT, DEST, 'junction')
+  linked = true
+  say('已链接：node_modules/' + PKG + ' → ' + ROOT)
+} catch (e) {
+  say('链接失败（' + e.message + '），改用拷贝')
+}
+
+if (!linked) {
+  fs.mkdirSync(DEST, { recursive: true })
+  for (const name of SHIP) {
+    const src = path.join(ROOT, name)
+    if (!fs.existsSync(src)) continue
+    fs.cpSync(src, path.join(DEST, name), { recursive: true })
+    say('+ ' + name)
+  }
 }
 say('  └ starsea/server.mjs 在不在：' + (fs.existsSync(path.join(DEST, 'starsea', 'server.mjs')) ? '在' : '不在！'))
 

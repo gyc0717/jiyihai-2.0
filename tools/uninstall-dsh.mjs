@@ -68,9 +68,18 @@ if (fs.existsSync(LOCK)) {
   }
 }
 
+// 删安装位置。如果它是链接（junction / symlink），只拆链接，绝不跟进去删目标目录 ——
+// 否则一句 rmSync 递归就把整个仓库删了。
 if (fs.existsSync(DEST)) {
-  fs.rmSync(DEST, { recursive: true, force: true })
-  console.log('  ✓ 已删除 node_modules/' + PKG)
+  let isLink = false
+  try { isLink = fs.lstatSync(DEST).isSymbolicLink() } catch { /* 忽略 */ }
+  if (isLink) {
+    try { fs.rmdirSync(DEST) } catch { fs.unlinkSync(DEST) }
+    console.log('  ✓ 已拆掉指向仓库的链接（仓库本身没动）')
+  } else {
+    fs.rmSync(DEST, { recursive: true, force: true })
+    console.log('  ✓ 已删除 node_modules/' + PKG)
+  }
 }
 
 console.log('\n重启 DeepSeek Harness 后入口就消失了。')
