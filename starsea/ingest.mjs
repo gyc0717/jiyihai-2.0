@@ -458,6 +458,21 @@ function readPrevLayout() {
   return null;
 }
 
+/** 上一次每条记忆占的槽位。靠它，层不变的时候位置就绝对不动。 */
+function readPrevSlots() {
+  const m = new Map();
+  try {
+    const doc = JSON.parse(fs.readFileSync(OUT_FILE, 'utf8'));
+    const s = doc && doc.slots;
+    if (s && typeof s === 'object') {
+      for (const [id, v] of Object.entries(s)) {
+        if (v && Number.isFinite(v.t) && Number.isFinite(v.i)) m.set(id, { tier: v.t, idx: v.i });
+      }
+    }
+  } catch { /* 第一次跑 */ }
+  return m;
+}
+
 function build() {
   const started = Date.now();
   const units = [...readDshSessions(), ...readDouyinMemory(), ...readInbox()]
@@ -480,26 +495,77 @@ function build() {
 
   const projected = vecs.map(project2d);
 
-  // ---- 位置：一片扁平的星海
-  // ---- 三层结构
-  //   核心层（最里，白点）—— 最近说的，还没沉下去的
-  //   普通层（中间）      —— 还常被想起来的
-  //   归档层（最外）      —— 很久没碰过的
-  // 按「新旧排名」分级：每次重抽都会重新排一次，所以新记忆会往里挤，
-  // 旧记忆会一层层往外沉 —— 这就是「把新数据填进空位再重新分级」。
-  // 角度仍由语义决定（说的是什么），半径由层级决定（有多新）。
-  const order = units.map((u, i) => i).sort((a, b) => units[b].t - units[a].t);
-  const tierOf = new Array(units.length);
-  const nCore = Math.max(1, Math.round(units.length * 0.16));
-  const nNormal = Math.max(1, Math.round(units.length * 0.40));
-  order.forEach((idx, rank) => {
-    tierOf[idx] = rank < nCore ? 0 : rank < nCore + nNormal ? 1 : 2;
-  });
+  // ---- 三层存储：分数分级 + 滞回 + 固定槽位
+  //
+  // 不再「每次重排」。现在是这样：
+  //   1) 每条记忆算一个分数（新近 0.6 + 浓度 0.4）
+  //   2) 按分数排名分层，但带滞回：掉进缓冲区不会立刻掉层，避免边界反复横跳
+  //   3) 每层有固定槽位；记忆**绑定槽位**，层不变就绝对不动
+  // 于是新记忆进来只占本层空位，只把最该沉的挤出去 —— 这才是「填空白再分级」。
+  const CAP = [32, 96, 480];
   const BAND = [
-    [1.2, 4.6],    // 核心
-    [5.4, 12.0],   // 普通
-    [13.0, 21.5],  // 归档
+    [1.2, 4.8],    // 核心
+    [5.6, 12.6],   // 普通
+    [13.2, 22.0],  // 归档
   ];
+  const GOLD = 2.399963229728653;
+
+  const slotAngle = (tier, k) => k * GOLD + tier * 0.7;
+  const slotPos = (tier, k) => {
+    const b = BAND[tier];
+    const a = slotAngle(tier, k);
+    const rad = b[0] + (b[1] - b[0]) * Math.sqrt((k + 0.5) / CAP[tier]);
+    return [
+      Number((Math.cos(a) * rad * 1.15).toFixed(2)),
+      Number((Math.sin(k * 1.7) * 0.55).toFixed(2)),
+      Number((Math.sin(a) * rad).toFixed(2)),
+    ];
+  };
+
+  const spanMs = Math.max(1, tMax - tMin);
+  const scoreOf = (u) => 0.6 * (1 - Math.min(1, (tMax - u.t) / spanMs)) + 0.4 * intensity(u.text);
+
+  const scored = units.map((u, i) => ({ i, u, s: scoreOf(u), ang: Math.atan2(projected[i][1], projected[i][0]) }))
+    .sort((a, b) => b.s - a.s);
+
+  const prevSlots = readPrevSlots();
+  const used = [new Set(), new Set(), new Set()];
+  const placed = new Map();
+
+  // 第一轮：层没变、槽位还空着，就原地不动
+  scored.forEach(({ i, u }, rank) => {
+    const p = prevSlots.get(u.id);
+    if (!p) return;
+    let tier = p.tier;
+    if (tier === 0 && rank >= CAP[0] + 8) tier = rank < CAP[0] + CAP[1] ? 1 : 2;
+    else if (tier === 1 && rank >= CAP[0] + CAP[1] + 16) tier = 2;
+    else if (tier === 1 && rank < CAP[0] - 6) tier = 0;
+    else if (tier === 2 && rank < CAP[0] - 6) tier = 0;
+    else if (tier === 2 && rank < CAP[0] + CAP[1] - 8) tier = 1;
+
+    if (p.tier === tier && p.idx < CAP[tier] && !used[tier].has(p.idx)) {
+      used[tier].add(p.idx);
+      placed.set(i, { tier, idx: p.idx });
+    }
+  });
+
+  // 第二轮：新来的 / 换层的，挑一个角度最接近自己语义方向的空位
+  scored.forEach(({ i, ang }, rank) => {
+    if (placed.has(i)) return;
+    const tier = rank < CAP[0] ? 0 : rank < CAP[0] + CAP[1] ? 1 : 2;
+
+    let best = -1;
+    let bestD = Infinity;
+    for (let k = 0; k < CAP[tier]; k++) {
+      if (used[tier].has(k)) continue;
+      const a = slotAngle(tier, k);
+      let d = Math.abs(((a - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    if (best < 0) best = CAP[tier] + used[tier].size; // 层满了就往外延，数据不丢
+    used[tier].add(best);
+    placed.set(i, { tier, idx: best });
+  });
 
   let layout = readPrevLayout();
   if (!layout) {
@@ -512,33 +578,17 @@ function build() {
   }
 
   const stars = units.map((u, i) => {
-    const [x0, z0] = projected[i];
-    const tier = tierOf[i];
-
-    // 角度 = 语义方向
-    const ang = Math.atan2(z0 / layout.sz, x0 / layout.sx);
-
-    // 稳定的微抖动，避免排成规则齿轮
-    const j1 = (hash32(u.id, 0x9e3779b1) % 1000) / 1000;
-    const j2 = (hash32(u.id, 0x85ebca6b) % 1000) / 1000;
-
-    // 半径 = 层级；sqrt 让点分布按面积均匀，不会挤在内圈
-    const [r0, r1] = BAND[tier];
-    const rad = r0 + (r1 - r0) * Math.sqrt(j1);
-    const a = ang + (j2 - 0.5) * 0.35;
-
-    const x = Math.cos(a) * rad;
-    const z = Math.sin(a) * rad;
-    const y = (j1 - 0.5) * 1.5;
+    const { tier, idx } = placed.get(i);
+    const [x, y, z] = slotPos(tier, idx);
     const w = intensity(u.text);
     return {
       id: u.id,
       src: u.source,
       t: u.t,
       tier,
+      slot: idx,
       title: (u.sessionTitle || u.who || '').slice(0, 40),
       who: u.who || '',
-      text: u.text.slice(0, 900),
       text: u.text.slice(0, 900),
       reply: (u.reply || '').slice(0, 700),
       tags: topTags(vecs[i], 4),
@@ -618,6 +668,16 @@ function build() {
   const sessions = new Set(stars.map((s) => s.session)).size;
   const tiers = [0, 1, 2].map((t) => stars.filter((s) => s.tier === t).length);
 
+  // 空槽位：数据不占，但位置上还留着"座位"，画成极淡的点
+  const empty = [];
+  for (let t = 0; t < 3; t++) {
+    for (let k = 0; k < CAP[t]; k++) {
+      if (!used[t].has(k)) empty.push([...slotPos(t, k), t]);
+    }
+  }
+  const slots = {};
+  for (const [i, p] of placed) slots[units[i].id] = { t: p.tier, i: p.idx };
+
   const doc = {
     generatedAt: new Date().toISOString(),
     tookMs: Date.now() - started,
@@ -633,6 +693,8 @@ function build() {
     },
     sources: Object.values(SOURCES).filter((s) => counts[s.id]).map((s) => ({ ...s, count: counts[s.id] })),
     clusters,
+    slots,
+    empty,
     stars,
     links,
   };

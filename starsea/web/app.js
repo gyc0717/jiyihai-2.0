@@ -367,6 +367,76 @@ gl.bufferData(gl.ARRAY_BUFFER, dust.size, gl.STATIC_DRAW);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufDustSeed);
 gl.bufferData(gl.ARRAY_BUFFER, dust.seed, gl.STATIC_DRAW);
 
+// ------------------------------------------------------------ 空槽位
+// 三层一共 608 个座位，没被记忆占的那些画成极淡的点 ——
+// 你能看见"这里还有位置"，也能看出哪一层快满了。
+
+const emptyBuf = { pos: new Float32Array(0), col: new Float32Array(0), size: new Float32Array(0), count: 0 };
+
+const vaoEmpty = gl.createVertexArray();
+const bufEmptyPos = gl.createBuffer();
+const bufEmptyCol = gl.createBuffer();
+const bufEmptySize = gl.createBuffer();
+const bufEmptySeed = gl.createBuffer();
+gl.bindVertexArray(vaoEmpty);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptyPos);
+gl.enableVertexAttribArray(loc.points.pos);
+gl.vertexAttribPointer(loc.points.pos, 3, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptyCol);
+gl.enableVertexAttribArray(loc.points.color);
+gl.vertexAttribPointer(loc.points.color, 4, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptySize);
+gl.enableVertexAttribArray(loc.points.size);
+gl.vertexAttribPointer(loc.points.size, 1, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptySeed);
+gl.enableVertexAttribArray(loc.points.seed);
+gl.vertexAttribPointer(loc.points.seed, 1, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+function setEmptySlots(list) {
+  const n = list.length;
+  emptyBuf.count = n;
+  if (!n) return;
+  if (emptyBuf.pos.length < n * 3) {
+    emptyBuf.pos = new Float32Array(n * 3);
+    emptyBuf.col = new Float32Array(n * 4);
+    emptyBuf.size = new Float32Array(n);
+  }
+  const tierTint = [[0.86, 0.90, 1.0, 0.07], [0.62, 0.74, 1.0, 0.05], [0.52, 0.64, 1.0, 0.035]];
+  for (let i = 0; i < n; i++) {
+    const e = list[i];
+    const t = e[3] | 0;
+    const c = tierTint[t] || tierTint[2];
+    emptyBuf.col[i * 4] = c[0]; emptyBuf.col[i * 4 + 1] = c[1]; emptyBuf.col[i * 4 + 2] = c[2]; emptyBuf.col[i * 4 + 3] = c[3];
+    emptyBuf.size[i] = 0.55;
+    emptyBuf.pos[i * 3] = e[0]; emptyBuf.pos[i * 3 + 1] = e[1]; emptyBuf.pos[i * 3 + 2] = e[2];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptyCol);
+  gl.bufferData(gl.ARRAY_BUFFER, emptyBuf.col, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptySize);
+  gl.bufferData(gl.ARRAY_BUFFER, emptyBuf.size, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptySeed);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(n), gl.DYNAMIC_DRAW);
+}
+
+/** 空槽位跟着记忆星一起转，用同一套角速度，不然会漂开 */
+function fillEmptyFrame(t) {
+  const n = emptyBuf.count;
+  if (!n || !S.empty.length) return;
+  const p = emptyBuf.pos;
+  for (let i = 0; i < n; i++) {
+    const e = S.empty[i];
+    const rr = Math.hypot(e[0], e[2]) || 1;
+    const a = t * SPIN * (1 + 0.10 * Math.exp(-rr / 28));
+    const ca = Math.cos(a), sa = Math.sin(a);
+    p[i * 3] = e[0] * ca - e[2] * sa;
+    p[i * 3 + 1] = e[1];
+    p[i * 3 + 2] = e[0] * sa + e[2] * ca;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufEmptyPos);
+  gl.bufferData(gl.ARRAY_BUFFER, p.subarray(0, n * 3), gl.DYNAMIC_DRAW);
+}
+
 // ------------------------------------------------------------ 状态
 
 const S = {
@@ -386,6 +456,7 @@ const S = {
   live: false,
   fitted: false,
   spawn: new Map(),
+  empty: [],
   frame: null,
   cursor: null,
   cursorWin: 0,
@@ -450,6 +521,8 @@ function applyData(data, animateNew) {
   S.links = data.links || [];
   S.clusters = data.clusters || [];
   S.sources = Object.fromEntries((data.sources || []).map((s) => [s.id, s]));
+  S.empty = data.empty || [];
+  try { setEmptySlots(S.empty); } catch { /* 老数据没有空槽位 */ }
 
   if (first) {
     S.camTo.target = [0, 0, 0];
@@ -1105,6 +1178,22 @@ function frame(now) {
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+  // 空槽位：先画，压在星尘和记忆星下面
+  if (emptyBuf.count) {
+    fillEmptyFrame(S.time);
+    gl.useProgram(progPoints);
+    gl.uniformMatrix4fv(loc.points.view, false, S.view);
+    gl.uniformMatrix4fv(loc.points.proj, false, S.proj);
+    gl.uniform1f(loc.points.rot, 0);
+    gl.uniform1f(loc.points.scale, 1);
+    gl.uniform1f(loc.points.alpha, S.cursor !== null ? 0.35 : 1);
+    gl.uniform1f(loc.points.time, 0);
+    gl.uniform1f(loc.points.drift, 0);
+    gl.uniform1f(loc.points.twinkle, 0);
+    gl.bindVertexArray(vaoEmpty);
+    gl.drawArrays(gl.POINTS, 0, emptyBuf.count);
+  }
 
   // 星尘：和记忆星同一套转动，否则几分钟后星就飘出星云了
   gl.useProgram(progPoints);
