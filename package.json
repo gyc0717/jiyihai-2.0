@@ -1,7 +1,7 @@
 {
   "name": "dsh-memory-starsea",
-  "version": "1.0.0",
-  "description": "把和 AI 聊过的记录摊成一片能漂游的星海 —— DeepSeek Harness 插件，一条记忆一颗星，相近的自成星座",
+  "version": "2.0.0",
+  "description": "记忆海 2.0 · 把和 AI 聊过的记录摊成一片能漂游的星海 —— DeepSeek Harness 插件，三层存储、星流转动",
   "type": "module",
   "main": "index.js",
   "exports": {

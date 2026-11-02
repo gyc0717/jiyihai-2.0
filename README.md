@@ -1,9 +1,9 @@
-# 记忆星海 · Memory Star Sea
+# 记忆海 2.0 · Memory Sea 2.0
 
 > 把和 AI 聊过的字，摊成一片能漂游的星海。
-> 一条记忆一颗星，时间越久越远；说得像的事会自己连成星座。
+> 一条记忆一颗星，三层存储决定它有多靠近核心；说得像的事会自己连成星座。
 
-![记忆星海](docs/preview.png)
+![记忆海 2.0](docs/preview.png)
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai) 插件：把本地的聊天记录抽成一片 3D 星海，
 侧边栏一点就开。数据不出这台电脑。
