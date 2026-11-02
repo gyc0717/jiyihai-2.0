@@ -312,14 +312,65 @@ button.ghost.on { border-color: rgba(127, 212, 255, 0.6); color: #eaf7ff; backgr
   color: rgba(140, 170, 210, .5);
   letter-spacing: .05em;
 }
-.timeline .bar { width: 120px; height: 1px; background: rgba(130, 175, 255, .18); position: relative; }
+.timeline .bar {
+  width: 260px;
+  height: 16px;
+  position: relative;
+  cursor: ew-resize;
+  touch-action: none;
+}
+/* 那根细线画在中线上，点击热区是整个 16px 高 */
+.timeline .bar::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+  background: rgba(130, 175, 255, .22);
+}
 .timeline .bar i {
-  position: absolute; left: 0; top: -1px; height: 3px; width: 0;
+  position: absolute; left: 0; top: calc(50% - 1px); height: 3px; width: 0;
   background: linear-gradient(90deg, rgba(110, 200, 255, .1), rgba(140, 220, 255, .9));
   border-radius: 2px;
   box-shadow: 0 0 12px rgba(120, 210, 255, .7);
   transition: width .3s;
+  pointer-events: none;
 }
+/* 游标 */
+.timeline .bar b {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 9px; height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: #dff1ff;
+  box-shadow: 0 0 10px rgba(150, 220, 255, .9), 0 0 24px rgba(120, 200, 255, .5);
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+.timeline .bar b.on { opacity: 1; }
+/* 拖动时浮在上面的日期 */
+.timeline .bar em {
+  position: absolute;
+  bottom: 18px;
+  left: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 190, 255, .25);
+  background: rgba(8, 14, 30, .82);
+  backdrop-filter: blur(8px);
+  color: #cfe6ff;
+  font-size: 10.5px;
+  font-style: normal;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+.timeline .bar em.on { opacity: 1; }
+.timeline.dragging .bar b { transform: scale(1.35); }
 
 .empty {
   position: fixed;

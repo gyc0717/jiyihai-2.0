@@ -158,24 +158,14 @@ void main() {
   float t = uTime * 0.010;
   float n1 = fbm(p * 2.1 + vec2(t, -t * 0.55));
   float n2 = fbm(p * 4.6 + vec2(-t * 0.7, t * 0.35) + n1 * 1.5);
-  float n3 = fbm(p * 1.15 + vec2(-t * 0.25, t * 0.15));
 
-  vec3 deep   = vec3(0.012, 0.016, 0.042);
-  vec3 blue   = vec3(0.075, 0.150, 0.360);
-  vec3 violet = vec3(0.180, 0.085, 0.330);
-  vec3 teal   = vec3(0.050, 0.190, 0.230);
-
-  vec3 c = deep;
-  c = mix(c, blue, smoothstep(0.30, 0.95, n1) * 0.95);
-  c = mix(c, violet, smoothstep(0.50, 1.0, n2) * 0.70);
-  c = mix(c, teal, smoothstep(0.62, 1.0, n3) * 0.30);
-
-  // 一条斜着的银河带
-  float band = exp(-pow((p.y * 1.5 + p.x * 0.42) * 2.4, 2.0));
-  c += vec3(0.055, 0.075, 0.150) * band * (0.55 + n2 * 0.8);
+  // 深空近乎纯黑：只留一点点极淡的冷色起伏，别把星海托灰
+  vec3 c = vec3(0.004, 0.005, 0.011);
+  c += vec3(0.020, 0.028, 0.058) * smoothstep(0.32, 1.0, n1) * 0.55;
+  c += vec3(0.018, 0.010, 0.030) * smoothstep(0.55, 1.0, n2) * 0.45;
 
   float r = length(p);
-  c *= 1.0 - smoothstep(0.30, 1.20, r) * 0.62;
+  c *= 1.0 - smoothstep(0.35, 1.25, r) * 0.7;
   o = vec4(c, 1.0);
 }`;
 
@@ -319,47 +309,54 @@ function makeDust(n) {
   const seed = new Float32Array(total);
 
   for (let i = 0; i < n; i++) {
-    // 三层空位：核心 / 普通 / 归档，越外面空位越多
-    const pick = Math.random();
+    // 指数盘 + 核球：密度从中心往外连续衰减，边缘慢慢化进黑里
     let rad;
-    if (pick < 0.12) rad = 0.4 + Math.random() * 4.4;         // 核心
-    else if (pick < 0.44) rad = 5.4 + Math.random() * 7.4;    // 普通
-    else rad = 12.8 + Math.random() * 10.4;                   // 归档
+    if (Math.random() < 0.22) {
+      // 核球：最亮那一小坨
+      rad = Math.abs(gauss()) * 3.4;
+    } else {
+      // 盘：r = -rd·ln(1-u) 会得到向中心堆积的密度
+      const u = Math.random();
+      rad = Math.min(-8.5 * Math.log(1 - u * 0.982), 34);
+    }
 
     const a = Math.random() * Math.PI * 2;
     // 越外面越薄，整片像一枚压扁的盘子
-    const thick = 1.7 * (1 - 0.55 * (rad / 23));
+    const thick = 1.5 * (1 - 0.6 * (rad / 34));
     const y = (Math.random() - 0.5) * 2 * thick;
 
-    const x = Math.cos(a) * rad;
+    // 横向拉宽一点，得到一个明显的椭圆
+    const x = Math.cos(a) * rad * 1.22;
     const z = Math.sin(a) * rad;
 
     pos[i * 3] = x;
     pos[i * 3 + 1] = y;
     pos[i * 3 + 2] = z;
 
-    // 颜色：核心偏白，外围偏冷
+    // 颜色：核心偏白，外围偏冷，偶尔一点暖黄
     const t = Math.random();
-    const c = rad < 5 ? (t < 0.8 ? [0.95, 0.96, 1.0] : [1.0, 0.93, 0.8])
-      : t < 0.6 ? [0.66, 0.76, 1.0] : t < 0.9 ? [0.52, 0.66, 1.0] : [1.0, 0.9, 0.76];
-    const fade = Math.exp(-rad / 13);
-    const a2 = (0.08 + Math.random() * 0.28) * (0.30 + 0.70 * fade);
+    const c = rad < 5
+      ? (t < 0.82 ? [0.96, 0.97, 1.0] : [1.0, 0.92, 0.78])
+      : t < 0.62 ? [0.72, 0.80, 1.0] : t < 0.92 ? [0.55, 0.68, 1.0] : [1.0, 0.88, 0.72];
+
+    const fade = Math.exp(-rad / 11);
+    const a2 = (0.07 + Math.random() * 0.26) * (0.20 + 0.80 * fade);
     col[i * 4] = c[0]; col[i * 4 + 1] = c[1]; col[i * 4 + 2] = c[2]; col[i * 4 + 3] = a2;
-    size[i] = 0.45 + Math.random() * 0.85 + (Math.random() < 0.02 ? 0.9 : 0);
+    size[i] = 0.40 + Math.random() * 0.75 + (Math.random() < 0.015 ? 0.8 : 0);
     seed[i] = Math.random();
   }
 
   // 最后一颗：核球的柔光，一颗很大的低透明度点
   const k = n;
   pos[k * 3] = 0; pos[k * 3 + 1] = 0; pos[k * 3 + 2] = 0;
-  col[k * 4] = 0.78; col[k * 4 + 1] = 0.86; col[k * 4 + 2] = 1.0; col[k * 4 + 3] = 0.16;
-  size[k] = 34;
+  col[k * 4] = 0.80; col[k * 4 + 1] = 0.87; col[k * 4 + 2] = 1.0; col[k * 4 + 3] = 0.20;
+  size[k] = 46;
   seed[k] = 0.5;
 
   return { pos, col, size, seed };
 }
 
-const DUST_N = 18000;
+const DUST_N = 36000;
 const dust = makeDust(DUST_N);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufDustPos);
 gl.bufferData(gl.ARRAY_BUFFER, dust.pos, gl.STATIC_DRAW);
@@ -390,6 +387,8 @@ const S = {
   fitted: false,
   spawn: new Map(),
   frame: null,
+  cursor: null,
+  cursorWin: 0,
   lastInput: performance.now(),
   // 俯角压低：远看是一条横着铺开的星带，而不是一盘站着的圆盘
   cam: { yaw: 0.45, pitch: 0.16, dist: 96, target: [0, 0, 0] },
@@ -430,6 +429,11 @@ async function load(rebuild = false) {
     const si = params.get('star');
     if (si !== null && S.stars[Number(si)]) {
       setTimeout(() => select(Number(si)), 400);
+    }
+    // ?cur=0.5 直接把时间游标放到中间（截图/分享某一天用）
+    const cur = params.get('cur');
+    if (cur !== null) {
+      setTimeout(() => setCursor(tlFracToTime(Number(cur))), 300);
     }
     connectLive();
   }
@@ -476,6 +480,10 @@ function applyData(data, animateNew) {
   if (!S.fitted) { fitCamera(); S.fitted = true; }
 
   renderMeta();
+  if (S.cursor !== null) {
+    // 数据变了，范围也可能变了，游标位置跟着重算
+    setCursor(S.cursor);
+  }
 
   if (!S.stars.length) {
     $('#empty').hidden = false;
@@ -736,6 +744,96 @@ function showCard(s) {
 
 $('#cardclose').onclick = deselect;
 
+// ------------------------------------------------------------ 时间轴（可拖动）
+//
+// 拖到哪一天，就只看那一天前后的一小段；双击复位。
+// 它不是"跳转"，是"过滤"——星海里其余的星会暗下去，不消失。
+
+const TL = { bar: $('#tl-bar'), handle: $('#tl-handle'), label: $('#tl-label'), wrap: $('#timeline') };
+
+function tlSpan() {
+  const st = S.data && S.data.stats;
+  return st && st.to > st.from ? st.to - st.from : 0;
+}
+
+function tlFracToTime(f) {
+  const st = S.data && S.data.stats;
+  if (!st) return 0;
+  return st.from + clamp(f, 0, 1) * (st.to - st.from);
+}
+
+function tlTimeToFrac(t) {
+  const span = tlSpan();
+  if (!span) return 0;
+  return clamp((S.data.stats.from ? t - S.data.stats.from : 0) / span, 0, 1);
+}
+
+function setCursor(t, visible = true) {
+  S.cursor = t;
+  const span = tlSpan();
+
+  // 起始窗口是全程的 1.6%（至少 1 小时）。
+  // 但那段时间可能正好是空的 —— 空的话就一路放宽，直到圈住至少 3 颗。
+  const count = (w) => S.stars.reduce((a, s) => a + (Math.abs(s.t - t) <= w ? 1 : 0), 0);
+  let win = Math.max(3600 * 1000, span * 0.016);
+  let n = count(win);
+  let guard = 0;
+  while (n < 3 && win < Math.max(span * 0.3, 3600 * 1000) && guard++ < 14) {
+    win *= 1.8;
+    n = count(win);
+  }
+  S.cursorWin = win;
+
+  const f = tlTimeToFrac(t);
+  TL.handle.style.left = `${f * 100}%`;
+  TL.label.style.left = `${clamp(f * 100, 4, 96)}%`;
+  TL.handle.classList.toggle('on', visible);
+  TL.label.classList.toggle('on', visible);
+
+  if (visible) {
+    const d = new Date(t);
+    const p = (x) => String(x).padStart(2, '0');
+    // 把窗口宽度也写出来 —— 数据稀疏时会自动放宽，不能让人以为只是那一个小时
+    const half = win / 3600000;
+    const span = half >= 48 ? `±${Math.round(half / 24)}天` : half >= 1.5 ? `±${Math.round(half)}小时` : '';
+    TL.label.textContent = `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}${span ? ' ' + span : ''} · ${n} 颗`;
+  }
+}
+
+function clearCursor() {
+  S.cursor = null;
+  S.cursorWin = 0;
+  TL.handle.classList.remove('on');
+  TL.label.classList.remove('on');
+}
+
+let tlDragging = false;
+
+TL.bar.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  try { TL.bar.setPointerCapture(e.pointerId); } catch { /* 忽略 */ }
+  tlDragging = true;
+  TL.wrap.classList.add('dragging');
+  const r = TL.bar.getBoundingClientRect();
+  setCursor(tlFracToTime((e.clientX - r.left) / r.width));
+});
+
+TL.bar.addEventListener('pointermove', (e) => {
+  if (!tlDragging) return;
+  const r = TL.bar.getBoundingClientRect();
+  setCursor(tlFracToTime((e.clientX - r.left) / r.width));
+});
+
+function tlEnd() {
+  tlDragging = false;
+  TL.wrap.classList.remove('dragging');
+}
+TL.bar.addEventListener('pointerup', tlEnd);
+TL.bar.addEventListener('pointercancel', tlEnd);
+TL.bar.addEventListener('dblclick', (e) => { e.stopPropagation(); clearCursor(); });
+
+
 $('#search').addEventListener('input', (e) => {
   S.q = e.target.value.trim();
   updateSearchInfo();
@@ -867,6 +965,19 @@ function buildStarBuffers(t) {
       else a *= 0.10;
     }
     if (i === S.hover) { size *= 1.35; a = Math.min(1, a + 0.25); }
+
+    // 时间游标：圈内的亮起来，圈外的沉下去
+    if (S.cursor !== null && S.cursorWin > 0) {
+      if (Math.abs(s.t - S.cursor) <= S.cursorWin) {
+        a = Math.min(1, a + 0.5);
+        size *= 1.3;
+        r = Math.min(1, r + 0.3);
+        g = Math.min(1, g + 0.3);
+        b = Math.min(1, b + 0.25);
+      } else {
+        a *= 0.09;
+      }
+    }
     if (i === S.selected) {
       const pulse = 1 + Math.sin(t * 3.2) * 0.10;
       size = 9.5 * pulse;
@@ -1001,7 +1112,7 @@ function frame(now) {
   gl.uniformMatrix4fv(loc.points.proj, false, S.proj);
   gl.uniform1f(loc.points.rot, S.time * SPIN);
   gl.uniform1f(loc.points.scale, 1);
-  gl.uniform1f(loc.points.alpha, 1);
+  gl.uniform1f(loc.points.alpha, S.cursor !== null ? 0.35 : 1);
   gl.uniform1f(loc.points.time, S.time);
   gl.uniform1f(loc.points.drift, 2.2);
   gl.uniform1f(loc.points.twinkle, 0.35);

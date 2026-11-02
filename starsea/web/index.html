@@ -34,6 +34,7 @@
     <section class="hint">
       <h2>怎么用</h2>
       <p>拖动旋转 · 滚轮远近 · 点星读记忆</p>
+      <p>拖底部时间轴，按时间找 · 双击复位</p>
       <p class="dim">空下来的时候，它会自己慢慢漂。</p>
     </section>
   </aside>
@@ -63,7 +64,11 @@
 
   <div class="hud timeline" id="timeline">
     <span id="tl-from"></span>
-    <div class="bar"><i id="tl-fill"></i></div>
+    <div class="bar" id="tl-bar" title="拖动按时间找记忆 · 双击复位">
+      <i id="tl-fill"></i>
+      <b id="tl-handle"></b>
+      <em id="tl-label"></em>
+    </div>
     <span id="tl-to"></span>
   </div>
 
