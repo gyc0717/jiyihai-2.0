@@ -300,31 +300,66 @@ gl.vertexAttribPointer(loc.lines.color, 4, gl.FLOAT, false, 0, 0);
 gl.bindVertexArray(null);
 
 // ------------------------------------------------------------ 星尘
+//
+// 记忆本身只有几百颗，远看太稀。参考真实星系的做法：
+// 用同一套「中间密、两边散」的分布，铺一层上万颗的底片，
+// 记忆星再压在这层底片上作为亮点。
+
+/** 近似正态（中心极限） */
+function gauss() {
+  return (Math.random() + Math.random() + Math.random() + Math.random() - 2) / 0.82;
+}
 
 function makeDust(n) {
-  const pos = new Float32Array(n * 3);
-  const col = new Float32Array(n * 4);
-  const size = new Float32Array(n);
-  const seed = new Float32Array(n);
+  // +1 颗是中心那团核球的柔光
+  const total = n + 1;
+  const pos = new Float32Array(total * 3);
+  const col = new Float32Array(total * 4);
+  const size = new Float32Array(total);
+  const seed = new Float32Array(total);
+
   for (let i = 0; i < n; i++) {
-    // 扁盘状分布，越外面越稀
-    const r = 18 + Math.pow(Math.random(), 0.65) * 95;
+    // 三层空位：核心 / 普通 / 归档，越外面空位越多
+    const pick = Math.random();
+    let rad;
+    if (pick < 0.12) rad = 0.4 + Math.random() * 4.4;         // 核心
+    else if (pick < 0.44) rad = 5.4 + Math.random() * 7.4;    // 普通
+    else rad = 12.8 + Math.random() * 10.4;                   // 归档
+
     const a = Math.random() * Math.PI * 2;
-    const h = (Math.random() - 0.5) * 34 * Math.exp(-r / 70);
-    pos[i * 3] = Math.cos(a) * r;
-    pos[i * 3 + 1] = h;
-    pos[i * 3 + 2] = Math.sin(a) * r;
+    // 越外面越薄，整片像一枚压扁的盘子
+    const thick = 1.7 * (1 - 0.55 * (rad / 23));
+    const y = (Math.random() - 0.5) * 2 * thick;
+
+    const x = Math.cos(a) * rad;
+    const z = Math.sin(a) * rad;
+
+    pos[i * 3] = x;
+    pos[i * 3 + 1] = y;
+    pos[i * 3 + 2] = z;
+
+    // 颜色：核心偏白，外围偏冷
     const t = Math.random();
-    const c = t < 0.6 ? [0.45, 0.62, 1.0] : t < 0.88 ? [0.72, 0.55, 1.0] : [1.0, 0.86, 0.62];
-    const a2 = 0.05 + Math.random() * 0.16;
+    const c = rad < 5 ? (t < 0.8 ? [0.95, 0.96, 1.0] : [1.0, 0.93, 0.8])
+      : t < 0.6 ? [0.66, 0.76, 1.0] : t < 0.9 ? [0.52, 0.66, 1.0] : [1.0, 0.9, 0.76];
+    const fade = Math.exp(-rad / 13);
+    const a2 = (0.08 + Math.random() * 0.28) * (0.30 + 0.70 * fade);
     col[i * 4] = c[0]; col[i * 4 + 1] = c[1]; col[i * 4 + 2] = c[2]; col[i * 4 + 3] = a2;
-    size[i] = 0.7 + Math.random() * 1.1;
+    size[i] = 0.45 + Math.random() * 0.85 + (Math.random() < 0.02 ? 0.9 : 0);
     seed[i] = Math.random();
   }
+
+  // 最后一颗：核球的柔光，一颗很大的低透明度点
+  const k = n;
+  pos[k * 3] = 0; pos[k * 3 + 1] = 0; pos[k * 3 + 2] = 0;
+  col[k * 4] = 0.78; col[k * 4 + 1] = 0.86; col[k * 4 + 2] = 1.0; col[k * 4 + 3] = 0.16;
+  size[k] = 34;
+  seed[k] = 0.5;
+
   return { pos, col, size, seed };
 }
 
-const DUST_N = 4200;
+const DUST_N = 18000;
 const dust = makeDust(DUST_N);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufDustPos);
 gl.bufferData(gl.ARRAY_BUFFER, dust.pos, gl.STATIC_DRAW);
@@ -496,7 +531,7 @@ function fitCamera() {
   // 横着铺开的星带，按宽度来取景；用分位数而不是最大值，免得一两颗离群的星把镜头拉太远
   const xs = S.stars.map((s) => Math.abs(s.pos[0])).sort((a, b) => a - b);
   const p = xs.length ? xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.92))] : 20;
-  S.cam.dist = clamp(p * 2.15, 45, 240);
+  S.cam.dist = clamp(p * 1.85, 42, 240);
   S.camTo.dist = S.cam.dist;
   S.cam.target = [0, 0, 0];
   S.camTo.target = [0, 0, 0];
@@ -813,6 +848,18 @@ function buildStarBuffers(t) {
     let a = 0.50 + s.weight * 0.50;
     let size = 2.8 + s.weight * 5.2;
 
+    // 三层三副面孔：核心是白点，普通保持来源色，归档层压暗
+    const tier = s.tier === undefined ? 1 : s.tier;
+    if (tier === 0) {
+      r = 1; g = 0.985; b = 0.94;
+      size *= 1.5;
+      a = Math.min(1, a + 0.25);
+    } else if (tier === 2) {
+      r *= 0.58; g *= 0.62; b *= 0.78;
+      size *= 0.82;
+      a *= 0.72;
+    }
+
     if (!visible(s)) a *= 0.07;
     if (S.cluster >= 0 && s.cluster !== S.cluster) a *= 0.10;
     if (query) {
@@ -820,11 +867,6 @@ function buildStarBuffers(t) {
       else a *= 0.10;
     }
     if (i === S.hover) { size *= 1.35; a = Math.min(1, a + 0.25); }
-
-    // 核心更亮：越靠近中心的星越大越亮，远看就是一团聚起来的高亮核心
-    const core = Math.exp(-Math.abs(s.pos[0]) / 9);
-    size *= 1 + core * 0.85;
-    a = Math.min(1, a + core * 0.22);
     if (i === S.selected) {
       const pulse = 1 + Math.sin(t * 3.2) * 0.10;
       size = 9.5 * pulse;
@@ -953,18 +995,18 @@ function frame(now) {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
-  // 星尘：比记忆星漂得快一点，形成视差
+  // 星尘：和记忆星同一套转动，否则几分钟后星就飘出星云了
   gl.useProgram(progPoints);
   gl.uniformMatrix4fv(loc.points.view, false, S.view);
   gl.uniformMatrix4fv(loc.points.proj, false, S.proj);
-  gl.uniform1f(loc.points.rot, S.time * 0.0055);
+  gl.uniform1f(loc.points.rot, S.time * SPIN);
   gl.uniform1f(loc.points.scale, 1);
   gl.uniform1f(loc.points.alpha, 1);
   gl.uniform1f(loc.points.time, S.time);
   gl.uniform1f(loc.points.drift, 2.2);
   gl.uniform1f(loc.points.twinkle, 0.35);
   gl.bindVertexArray(vaoDust);
-  gl.drawArrays(gl.POINTS, 0, DUST_N);
+  gl.drawArrays(gl.POINTS, 0, DUST_N + 1);
 
   // 连线
   if (lineCount > 0) {

@@ -481,12 +481,26 @@ function build() {
   const projected = vecs.map(project2d);
 
   // ---- 位置：一片扁平的星海
-  //   x —— 语义主轴，左右延展。随机投影出来的分布本身近似正态，
-  //        所以中间天然密、往两边越来越稀，正好是「核心 + 散开的碎星」。
-  //   z —— 纵深：语义次轴 + 时间（越久远越靠里）。
-  //   y —— 压得很薄，远看就是一条横着铺开的星带。
-  // 锚点（t0 / 语义缩放）存在 starsea.json 里，之后一直沿用：
-  // 新星只会在带子边缘长出来，旧星不会整体挪窝。
+  // ---- 三层结构
+  //   核心层（最里，白点）—— 最近说的，还没沉下去的
+  //   普通层（中间）      —— 还常被想起来的
+  //   归档层（最外）      —— 很久没碰过的
+  // 按「新旧排名」分级：每次重抽都会重新排一次，所以新记忆会往里挤，
+  // 旧记忆会一层层往外沉 —— 这就是「把新数据填进空位再重新分级」。
+  // 角度仍由语义决定（说的是什么），半径由层级决定（有多新）。
+  const order = units.map((u, i) => i).sort((a, b) => units[b].t - units[a].t);
+  const tierOf = new Array(units.length);
+  const nCore = Math.max(1, Math.round(units.length * 0.16));
+  const nNormal = Math.max(1, Math.round(units.length * 0.40));
+  order.forEach((idx, rank) => {
+    tierOf[idx] = rank < nCore ? 0 : rank < nCore + nNormal ? 1 : 2;
+  });
+  const BAND = [
+    [1.2, 4.6],    // 核心
+    [5.4, 12.0],   // 普通
+    [13.0, 21.5],  // 归档
+  ];
+
   let layout = readPrevLayout();
   if (!layout) {
     layout = {
@@ -497,29 +511,34 @@ function build() {
     };
   }
 
-  const DAY = 86400000;
   const stars = units.map((u, i) => {
     const [x0, z0] = projected[i];
-    const days = Math.max(0, (u.t - layout.t0) / DAY);
-    const grow = 1 - Math.exp(-days / 18);
+    const tier = tierOf[i];
 
-    const tx = Math.max(-2.6, Math.min(2.6, x0 / layout.sx));
-    const tz = Math.max(-2.6, Math.min(2.6, z0 / layout.sz));
+    // 角度 = 语义方向
+    const ang = Math.atan2(z0 / layout.sz, x0 / layout.sx);
 
-    // 稳定的微抖动，避免规则得像素描格子
-    const j1 = (hash32(u.id, 0x9e3779b1) % 1000) / 1000 - 0.5;
-    const j2 = (hash32(u.id, 0x85ebca6b) % 1000) / 1000 - 0.5;
+    // 稳定的微抖动，避免排成规则齿轮
+    const j1 = (hash32(u.id, 0x9e3779b1) % 1000) / 1000;
+    const j2 = (hash32(u.id, 0x85ebca6b) % 1000) / 1000;
 
-    const x = tx * 19 + j1 * 1.4;
-    const z = tz * 5.5 + (grow - 0.5) * 10 + j2 * 1.6;
-    const y = j1 * 2.4 + (grow - 0.5) * 1.4;
+    // 半径 = 层级；sqrt 让点分布按面积均匀，不会挤在内圈
+    const [r0, r1] = BAND[tier];
+    const rad = r0 + (r1 - r0) * Math.sqrt(j1);
+    const a = ang + (j2 - 0.5) * 0.35;
+
+    const x = Math.cos(a) * rad;
+    const z = Math.sin(a) * rad;
+    const y = (j1 - 0.5) * 1.5;
     const w = intensity(u.text);
     return {
       id: u.id,
       src: u.source,
       t: u.t,
+      tier,
       title: (u.sessionTitle || u.who || '').slice(0, 40),
       who: u.who || '',
+      text: u.text.slice(0, 900),
       text: u.text.slice(0, 900),
       reply: (u.reply || '').slice(0, 700),
       tags: topTags(vecs[i], 4),
@@ -597,6 +616,7 @@ function build() {
   const counts = {};
   for (const s of stars) counts[s.src] = (counts[s.src] || 0) + 1;
   const sessions = new Set(stars.map((s) => s.session)).size;
+  const tiers = [0, 1, 2].map((t) => stars.filter((s) => s.tier === t).length);
 
   const doc = {
     generatedAt: new Date().toISOString(),
@@ -607,6 +627,7 @@ function build() {
       links: links.length,
       sessions,
       sources: counts,
+      tiers,
       from: tMin,
       to: tMax,
     },
