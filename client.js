@@ -70,11 +70,13 @@ window.__ModuleLoader__.load({
 `
 
     function openSea() {
+      // 注意：这里不能带 noopener。
+      // 按规范 window.open(..., 'noopener') 的返回值恒为 null，
+      // 于是下面的兜底会自动执行 —— 一次点击开出两个界面（外部一个 + 面板自己跳走）。
       try {
-        const w = window.open(TARGET, '_blank', 'noopener,noreferrer')
-        if (!w) window.location.assign(TARGET)
+        window.open(TARGET, '_blank')
       } catch (e) {
-        try { window.location.assign(TARGET) } catch { /* 交给用户手动打开 */ }
+        /* 真被拦了就手动打开下面那行地址，别把宿主页面顶掉 */
       }
     }
 

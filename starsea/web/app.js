@@ -53,34 +53,56 @@ const VS_POINTS = `#version 300 es
 in vec3 aPos;
 in vec4 aColor;
 in float aSize;
+in float aSeed;
 uniform mat4 uView;
 uniform mat4 uProj;
 uniform float uRot;
 uniform float uScale;
+uniform float uTime;
+uniform float uDrift;
 out vec4 vColor;
+out float vSeed;
 void main() {
   float c = cos(uRot), s = sin(uRot);
   vec3 p = vec3(aPos.x * c - aPos.z * s, aPos.y, aPos.x * s + aPos.z * c);
+
+  // 星海在流：每颗星按自己的相位轻轻漂，像被同一股洋流推着走
+  float ph = uTime * 0.42 + aSeed * 6.2831;
+  p.x += sin(ph) * 0.75 * uDrift;
+  p.y += cos(ph * 0.83) * 0.55 * uDrift;
+  p.z += sin(ph * 1.27 + 1.7) * 0.75 * uDrift;
+
   vec4 mv = uView * vec4(p, 1.0);
   gl_Position = uProj * mv;
   float depth = max(0.6, -mv.z);
   gl_PointSize = aSize * uScale * (240.0 / depth);
   vColor = aColor;
+  vSeed = aSeed;
 }`;
 
 const FS_POINTS = `#version 300 es
 precision highp float;
 in vec4 vColor;
+in float vSeed;
 uniform float uAlpha;
+uniform float uTime;
+uniform float uTwinkle;
 out vec4 o;
 void main() {
   vec2 p = gl_PointCoord * 2.0 - 1.0;
   float r = length(p);
   if (r > 1.0) discard;
-  float core = pow(max(0.0, 1.0 - r), 5.0);
-  float halo = pow(max(0.0, 1.0 - r), 1.5) * 0.42;
-  float a = core + halo;
-  o = vec4(vColor.rgb * (0.6 + a * 1.9), vColor.a * a * uAlpha);
+
+  // 硬核心 + 柔光晕。之前只有一团高斯，远看就糊成一片
+  float core = 1.0 - smoothstep(0.0, 0.30, r);
+  float halo = pow(max(0.0, 1.0 - r), 3.0);
+  float a = core * 1.3 + halo * 0.40;
+
+  // 每颗星自己的呼吸
+  float tw = 0.72 + 0.28 * sin(uTime * 2.1 + vSeed * 37.0);
+  a *= mix(1.0, tw, uTwinkle);
+
+  o = vec4(vColor.rgb * (0.78 + a * 1.05), vColor.a * a * uAlpha);
 }`;
 
 const VS_LINES = `#version 300 es
@@ -191,11 +213,15 @@ const loc = {
     pos: gl.getAttribLocation(progPoints, 'aPos'),
     color: gl.getAttribLocation(progPoints, 'aColor'),
     size: gl.getAttribLocation(progPoints, 'aSize'),
+    seed: gl.getAttribLocation(progPoints, 'aSeed'),
     view: gl.getUniformLocation(progPoints, 'uView'),
     proj: gl.getUniformLocation(progPoints, 'uProj'),
     rot: gl.getUniformLocation(progPoints, 'uRot'),
     scale: gl.getUniformLocation(progPoints, 'uScale'),
     alpha: gl.getUniformLocation(progPoints, 'uAlpha'),
+    time: gl.getUniformLocation(progPoints, 'uTime'),
+    drift: gl.getUniformLocation(progPoints, 'uDrift'),
+    twinkle: gl.getUniformLocation(progPoints, 'uTwinkle'),
   },
   lines: {
     pos: gl.getAttribLocation(progLines, 'aPos'),
@@ -222,6 +248,7 @@ const vaoDust = gl.createVertexArray();
 const bufDustPos = gl.createBuffer();
 const bufDustCol = gl.createBuffer();
 const bufDustSize = gl.createBuffer();
+const bufDustSeed = gl.createBuffer();
 gl.bindVertexArray(vaoDust);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufDustPos);
 gl.enableVertexAttribArray(loc.points.pos);
@@ -232,11 +259,15 @@ gl.vertexAttribPointer(loc.points.color, 4, gl.FLOAT, false, 0, 0);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufDustSize);
 gl.enableVertexAttribArray(loc.points.size);
 gl.vertexAttribPointer(loc.points.size, 1, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufDustSeed);
+gl.enableVertexAttribArray(loc.points.seed);
+gl.vertexAttribPointer(loc.points.seed, 1, gl.FLOAT, false, 0, 0);
 
 const vaoStars = gl.createVertexArray();
 const bufStarPos = gl.createBuffer();
 const bufStarCol = gl.createBuffer();
 const bufStarSize = gl.createBuffer();
+const bufStarSeed = gl.createBuffer();
 gl.bindVertexArray(vaoStars);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufStarPos);
 gl.enableVertexAttribArray(loc.points.pos);
@@ -247,6 +278,9 @@ gl.vertexAttribPointer(loc.points.color, 4, gl.FLOAT, false, 0, 0);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufStarSize);
 gl.enableVertexAttribArray(loc.points.size);
 gl.vertexAttribPointer(loc.points.size, 1, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufStarSeed);
+gl.enableVertexAttribArray(loc.points.seed);
+gl.vertexAttribPointer(loc.points.seed, 1, gl.FLOAT, false, 0, 0);
 
 const vaoLines = gl.createVertexArray();
 const bufLinePos = gl.createBuffer();
@@ -266,6 +300,7 @@ function makeDust(n) {
   const pos = new Float32Array(n * 3);
   const col = new Float32Array(n * 4);
   const size = new Float32Array(n);
+  const seed = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     // 扁盘状分布，越外面越稀
     const r = 18 + Math.pow(Math.random(), 0.65) * 95;
@@ -279,8 +314,9 @@ function makeDust(n) {
     const a2 = 0.05 + Math.random() * 0.16;
     col[i * 4] = c[0]; col[i * 4 + 1] = c[1]; col[i * 4 + 2] = c[2]; col[i * 4 + 3] = a2;
     size[i] = 0.7 + Math.random() * 1.1;
+    seed[i] = Math.random();
   }
-  return { pos, col, size };
+  return { pos, col, size, seed };
 }
 
 const DUST_N = 4200;
@@ -291,6 +327,8 @@ gl.bindBuffer(gl.ARRAY_BUFFER, bufDustCol);
 gl.bufferData(gl.ARRAY_BUFFER, dust.col, gl.STATIC_DRAW);
 gl.bindBuffer(gl.ARRAY_BUFFER, bufDustSize);
 gl.bufferData(gl.ARRAY_BUFFER, dust.size, gl.STATIC_DRAW);
+gl.bindBuffer(gl.ARRAY_BUFFER, bufDustSeed);
+gl.bufferData(gl.ARRAY_BUFFER, dust.seed, gl.STATIC_DRAW);
 
 // ------------------------------------------------------------ 状态
 
@@ -721,8 +759,19 @@ window.addEventListener('resize', resize);
 
 // ------------------------------------------------------------ 渲染
 
-const starBuf = { pos: new Float32Array(0), col: new Float32Array(0), size: new Float32Array(0) };
+const starBuf = { pos: new Float32Array(0), col: new Float32Array(0), size: new Float32Array(0), seed: new Float32Array(0) };
 const lineBuf = { pos: new Float32Array(0), col: new Float32Array(0) };
+
+/** 每颗星一个稳定的相位，用来让「流动」和「呼吸」互不同步。 */
+function seedOf(id) {
+  let h = 2166136261 >>> 0;
+  const s = String(id);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return (h % 10000) / 10000;
+}
 
 function grow(arr, n) {
   return arr.length >= n ? arr : new Float32Array(n);
@@ -734,6 +783,7 @@ function buildStarBuffers(t) {
     starBuf.pos = new Float32Array(n * 3);
     starBuf.col = new Float32Array(n * 4);
     starBuf.size = new Float32Array(n);
+    starBuf.seed = new Float32Array(n);
   }
   const sel = S.stars[S.selected];
   const query = S.q;
@@ -783,6 +833,7 @@ function buildStarBuffers(t) {
     starBuf.col[i * 4 + 2] = b;
     starBuf.col[i * 4 + 3] = a;
     starBuf.size[i] = size;
+    starBuf.seed[i] = seedOf(s.id);
   }
 
   // 选中的星，把它的连线拎出来
@@ -862,13 +913,16 @@ function frame(now) {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
-  // 星尘
+  // 星尘：比记忆星漂得快一点，形成视差
   gl.useProgram(progPoints);
   gl.uniformMatrix4fv(loc.points.view, false, S.view);
   gl.uniformMatrix4fv(loc.points.proj, false, S.proj);
   gl.uniform1f(loc.points.rot, S.time * 0.0055);
   gl.uniform1f(loc.points.scale, 1);
   gl.uniform1f(loc.points.alpha, 1);
+  gl.uniform1f(loc.points.time, S.time);
+  gl.uniform1f(loc.points.drift, 2.2);
+  gl.uniform1f(loc.points.twinkle, 0.35);
   gl.bindVertexArray(vaoDust);
   gl.drawArrays(gl.POINTS, 0, DUST_N);
 
@@ -892,6 +946,9 @@ function frame(now) {
   gl.uniform1f(loc.points.rot, 0);
   gl.uniform1f(loc.points.scale, 1);
   gl.uniform1f(loc.points.alpha, 1);
+  gl.uniform1f(loc.points.time, S.time);
+  gl.uniform1f(loc.points.drift, 1);
+  gl.uniform1f(loc.points.twinkle, 1);
   gl.bindVertexArray(vaoStars);
   gl.bindBuffer(gl.ARRAY_BUFFER, bufStarPos);
   gl.bufferData(gl.ARRAY_BUFFER, starBuf.pos, gl.DYNAMIC_DRAW);
@@ -899,11 +956,15 @@ function frame(now) {
   gl.bufferData(gl.ARRAY_BUFFER, starBuf.col, gl.DYNAMIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER, bufStarSize);
   gl.bufferData(gl.ARRAY_BUFFER, starBuf.size, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufStarSeed);
+  gl.bufferData(gl.ARRAY_BUFFER, starBuf.seed, gl.DYNAMIC_DRAW);
   gl.drawArrays(gl.POINTS, 0, S.stars.length);
 
-  // 再画一层放大的柔光，当作廉价的泛光
-  gl.uniform1f(loc.points.scale, 3.4);
-  gl.uniform1f(loc.points.alpha, 0.085);
+  // 再画一层放大的柔光，当作廉价的泛光。
+  // 这一层不能太重，否则整片星海会糊——清晰度主要靠上面那层硬核心。
+  gl.uniform1f(loc.points.scale, 2.6);
+  gl.uniform1f(loc.points.alpha, 0.055);
+  gl.uniform1f(loc.points.twinkle, 0);
   gl.drawArrays(gl.POINTS, 0, S.stars.length);
 
   gl.bindVertexArray(null);
