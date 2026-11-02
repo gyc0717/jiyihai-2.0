@@ -4,6 +4,9 @@
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+// 星流：整片星海绕中心转的角速度（弧度/秒）。转一圈约 8.7 分钟。
+const SPIN = 0.012;
+
 // ------------------------------------------------------------ 4x4 矩阵
 
 const M4 = {
@@ -349,6 +352,7 @@ const S = {
   live: false,
   fitted: false,
   spawn: new Map(),
+  frame: null,
   lastInput: performance.now(),
   cam: { yaw: 0.7, pitch: 0.30, dist: 96, target: [0, 0, 0] },
   camTo: { yaw: 0.7, pitch: 0.30, dist: 96, target: [0, 0, 0] },
@@ -601,12 +605,13 @@ function hoverAt(cx, cy) {
 }
 
 function pick(cx, cy) {
-  if (!S.proj) return -1;
+  if (!S.proj || !S.frame) return -1;
   const rect = canvas.getBoundingClientRect();
   let best = -1, bestD = 16;
   for (let i = 0; i < S.stars.length; i++) {
     const s = S.stars[i];
-    const p = project(s.pos);
+    // 用这一帧的实际位置来拾取：星海在转，静态坐标会点偏
+    const p = project(S.frame, i * 3);
     if (!p) continue;
     const d = Math.hypot(p[0] - (cx - rect.left), p[1] - (cy - rect.top));
     const bias = s.weight > 0.6 ? 3 : 0;
@@ -615,12 +620,13 @@ function pick(cx, cy) {
   return best;
 }
 
-function project(pos) {
+function project(arr, o) {
   if (!S.view || !S.proj) return null;
   const v = S.view, m = S.proj;
-  const x = v[0] * pos[0] + v[4] * pos[1] + v[8] * pos[2] + v[12];
-  const y = v[1] * pos[0] + v[5] * pos[1] + v[9] * pos[2] + v[13];
-  const z = v[2] * pos[0] + v[6] * pos[1] + v[10] * pos[2] + v[14];
+  const px = arr[o], py = arr[o + 1], pz = arr[o + 2];
+  const x = v[0] * px + v[4] * py + v[8] * pz + v[12];
+  const y = v[1] * px + v[5] * py + v[9] * pz + v[13];
+  const z = v[2] * px + v[6] * py + v[10] * pz + v[14];
   const w = -z;
   if (w <= 0.1) return null;
   const cx = m[0] * x, cy = m[5] * y;
@@ -637,7 +643,12 @@ function select(i) {
   S.selected = i;
   S.flying = true;
   const s = S.stars[i];
-  S.camTo.target = [s.pos[0] * 0.55, s.pos[1] * 0.3, s.pos[2] * 0.55];
+  // 星在转，镜头要跟到它现在待的位置
+  if (S.frame) {
+    S.camTo.target = [S.frame[i * 3] * 0.55, S.frame[i * 3 + 1] * 0.3, S.frame[i * 3 + 2] * 0.55];
+  } else {
+    S.camTo.target = [s.pos[0] * 0.55, s.pos[1] * 0.3, s.pos[2] * 0.55];
+  }
   S.camTo.dist = 52;
   showCard(s);
   const u = new URL(location.href);
@@ -784,6 +795,7 @@ function buildStarBuffers(t) {
     starBuf.col = new Float32Array(n * 4);
     starBuf.size = new Float32Array(n);
     starBuf.seed = new Float32Array(n);
+    S.frame = new Float32Array(n * 3);
   }
   const sel = S.stars[S.selected];
   const query = S.q;
@@ -825,15 +837,30 @@ function buildStarBuffers(t) {
       }
     }
 
-    starBuf.pos[i * 3] = s.pos[0];
-    starBuf.pos[i * 3 + 1] = s.pos[1];
-    starBuf.pos[i * 3 + 2] = s.pos[2];
+    // 星流：整片海绕中心缓缓转，内圈比外圈快一点点 —— 转起来才有银河的样子
+    const seed = seedOf(s.id);
+    const r0 = Math.hypot(s.pos[0], s.pos[2]) || 1;
+    const omega = SPIN * (1 + 0.10 * Math.exp(-r0 / 28));
+    const ang = t * omega;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const ph = t * 0.42 + seed * 6.2831;
+
+    const x = (s.pos[0] * ca - s.pos[2] * sa) + Math.sin(ph) * 0.75;
+    const y = s.pos[1] + Math.cos(ph * 0.83) * 0.55;
+    const z = (s.pos[0] * sa + s.pos[2] * ca) + Math.sin(ph * 1.27 + 1.7) * 0.75;
+
+    starBuf.pos[i * 3] = x;
+    starBuf.pos[i * 3 + 1] = y;
+    starBuf.pos[i * 3 + 2] = z;
+    S.frame[i * 3] = x;
+    S.frame[i * 3 + 1] = y;
+    S.frame[i * 3 + 2] = z;
     starBuf.col[i * 4] = r;
     starBuf.col[i * 4 + 1] = g;
     starBuf.col[i * 4 + 2] = b;
     starBuf.col[i * 4 + 3] = a;
     starBuf.size[i] = size;
-    starBuf.seed[i] = seedOf(s.id);
+    starBuf.seed[i] = seed;
   }
 
   // 选中的星，把它的连线拎出来
@@ -843,6 +870,7 @@ function buildStarBuffers(t) {
     lineBuf.col = new Float32Array(m * 8);
   }
   let k = 0;
+  const F = S.frame;
   for (let i = 0; i < m; i++) {
     const [a, b, strength, kind] = S.links[i];
     const sa = S.stars[a], sb = S.stars[b];
@@ -852,13 +880,13 @@ function buildStarBuffers(t) {
     if (isSel) alpha = 0.5;
     else if (S.selected >= 0) alpha *= 0.35;
     // 跨得太远的连线淡下去，不然像画了条直线穿屏
-    const dist = Math.hypot(sa.pos[0] - sb.pos[0], sa.pos[1] - sb.pos[1], sa.pos[2] - sb.pos[2]);
+    const dist = Math.hypot(F[a * 3] - F[b * 3], F[a * 3 + 1] - F[b * 3 + 1], F[a * 3 + 2] - F[b * 3 + 2]);
     alpha *= clamp(1.2 - dist / 85, 0.10, 1);
     if (!visible(sa) || !visible(sb)) alpha *= 0.15;
     if (query && !(matches(sa) && matches(sb))) alpha *= 0.2;
     const rr = isSel ? 0.75 : 0.45, gg = isSel ? 0.9 : 0.65, bb = isSel ? 1.0 : 1.0;
-    lineBuf.pos[k * 6] = sa.pos[0]; lineBuf.pos[k * 6 + 1] = sa.pos[1]; lineBuf.pos[k * 6 + 2] = sa.pos[2];
-    lineBuf.pos[k * 6 + 3] = sb.pos[0]; lineBuf.pos[k * 6 + 4] = sb.pos[1]; lineBuf.pos[k * 6 + 5] = sb.pos[2];
+    lineBuf.pos[k * 6] = F[a * 3]; lineBuf.pos[k * 6 + 1] = F[a * 3 + 1]; lineBuf.pos[k * 6 + 2] = F[a * 3 + 2];
+    lineBuf.pos[k * 6 + 3] = F[b * 3]; lineBuf.pos[k * 6 + 4] = F[b * 3 + 1]; lineBuf.pos[k * 6 + 5] = F[b * 3 + 2];
     lineBuf.col[k * 8] = rr; lineBuf.col[k * 8 + 1] = gg; lineBuf.col[k * 8 + 2] = bb; lineBuf.col[k * 8 + 3] = alpha;
     lineBuf.col[k * 8 + 4] = rr; lineBuf.col[k * 8 + 5] = gg; lineBuf.col[k * 8 + 6] = bb; lineBuf.col[k * 8 + 7] = alpha;
     k++;
@@ -874,7 +902,8 @@ function frame(now) {
   // 闲置后自动漂游
   const idle = now - S.lastInput > 2600;
   if (S.drift && idle && !drag) {
-    S.camTo.yaw += dt * 0.000045;
+    // 镜头只轻轻转，主角让给星海自己的星流
+    S.camTo.yaw += dt * 0.000016;
     S.camTo.pitch = clamp(S.camTo.pitch + Math.sin(S.time * 0.13) * dt * 0.000012, -0.9, 0.9);
   }
 
@@ -947,7 +976,7 @@ function frame(now) {
   gl.uniform1f(loc.points.scale, 1);
   gl.uniform1f(loc.points.alpha, 1);
   gl.uniform1f(loc.points.time, S.time);
-  gl.uniform1f(loc.points.drift, 1);
+  gl.uniform1f(loc.points.drift, 0); // 星的位置已经在 CPU 算好了（含星流与漂移）
   gl.uniform1f(loc.points.twinkle, 1);
   gl.bindVertexArray(vaoStars);
   gl.bindBuffer(gl.ARRAY_BUFFER, bufStarPos);
